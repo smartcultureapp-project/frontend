@@ -1,65 +1,148 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Link from "next/link";
+import {
+  Button,
+  Group,
+  Stack,
+  Text,
+  Title,
+  Box,
+  Divider,
+} from "@mantine/core";
+import { IconArrowRight, IconArrowUpRight } from "@tabler/icons-react";
+import { PageContainer } from "./components/PageContainer";
+import classes from "./page.module.css";
+
+const steps = [
+  {
+    num: "01",
+    href: "/analyze",
+    title: "회사 분석",
+    desc: "지원 회사의 인재상·기술스택·면접 후기를 웹에서 자동 수집",
+    duration: "약 30초",
+  },
+  {
+    num: "02",
+    href: "/resume",
+    title: "이력서 분석 + 질문 생성",
+    desc: "이력서와 회사 정보를 결합해 평가표·맞춤 질문 10개 생성",
+    duration: "약 1분",
+  },
+  {
+    num: "03",
+    href: "/interview",
+    title: "멀티 에이전트 면접",
+    desc: "주면접관·기술면접관·인사담당관 3명이 협력하며 진행",
+    duration: "10~15분",
+  },
+  {
+    num: "04",
+    href: "/report",
+    title: "채점 및 리포트",
+    desc: "각 면접관의 독립 채점을 종합한 점수·강점·개선점 리포트",
+    duration: "약 20초",
+  },
+];
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <PageContainer size="lg">
+      <Stack gap={80}>
+        <Stack gap="xl" pt={48} pb={24}>
+          <Text fz="xs" c="brand.6" style={{ letterSpacing: 1.5 }} fw={600}>
+            PREQ · AI INTERVIEW COACH
+          </Text>
+          <Title order={1} fz={48} lh={1.15} fw={800} maw={680}>
+            실제 면접에 가장 가까운
+            <br />
+            <Text
+              component="span"
+              inherit
+              variant="gradient"
+              gradient={{ from: "brand.6", to: "brand.4", deg: 100 }}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              AI 모의면접 코치
+            </Text>
+          </Title>
+          <Text c="dark.6" fz="lg" maw={560} lh={1.6}>
+            3명의 AI 면접관이 회사 정보와 이력서를 바탕으로 실제 면접처럼
+            질문하고 꼬리질문하며 채점해 드립니다.
+          </Text>
+          <Group gap="md" mt="xs">
+            <Button
+              component={Link}
+              href="/analyze"
+              size="md"
+              color="brand"
+              rightSection={<IconArrowRight size={16} />}
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+              면접 시작하기
+            </Button>
+            <Button
+              component="a"
+              href="#how"
+              size="md"
+              variant="subtle"
+              color="dark"
+            >
+              어떻게 작동하나요?
+            </Button>
+          </Group>
+        </Stack>
+
+        <Stack gap={0} id="how">
+          <Group justify="space-between" align="end" mb="xs">
+            <Title order={3} fz="md" fw={700} style={{ letterSpacing: -0.2 }}>
+              진행 단계
+            </Title>
+            <Text fz="xs" c="dimmed">
+              전체 약 12~17분 소요
+            </Text>
+          </Group>
+          <Divider />
+          {steps.map((step) => (
+            <Box key={step.num}>
+              <Link href={step.href} className={classes.stepRow}>
+                <Group align="flex-start" wrap="nowrap" gap="xl">
+                  <Text
+                    fz={14}
+                    fw={500}
+                    ff="monospace"
+                    c="dimmed"
+                    className={classes.stepNum}
+                    style={{ minWidth: 40, paddingTop: 2 }}
+                  >
+                    {step.num}
+                  </Text>
+                  <Stack gap={4} style={{ flex: 1 }}>
+                    <Text fw={600} fz="md">
+                      {step.title}
+                    </Text>
+                    <Text fz="sm" c="dimmed" lh={1.55}>
+                      {step.desc}
+                    </Text>
+                  </Stack>
+                  <Group
+                    gap={6}
+                    align="center"
+                    style={{ minWidth: 90, justifyContent: "flex-end" }}
+                    wrap="nowrap"
+                  >
+                    <Text fz="xs" c="dimmed">
+                      {step.duration}
+                    </Text>
+                    <span className={classes.chevron}>
+                      <IconArrowUpRight size={16} />
+                    </span>
+                  </Group>
+                </Group>
+              </Link>
+              <Divider />
+            </Box>
+          ))}
+        </Stack>
+      </Stack>
+    </PageContainer>
   );
 }

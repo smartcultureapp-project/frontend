@@ -1,0 +1,209 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  background: var(--mantine-color-gray-0);
+}
+
+.topbar {
+  background: white;
+  border-bottom: 1px solid var(--mantine-color-gray-2);
+}
+
+.recDot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+.recDot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #ef4444;
+  opacity: 0.6;
+  animation: ringPulse 1.6s var(--ease-out) infinite;
+}
+
+@keyframes ringPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+.main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+}
+
+@media (max-width: 960px) {
+  .main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+  }
+}
+
+.camArea {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.camFeed {
+  flex: 1;
+  background: #0a0a0a;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 360px;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.03) 0%, transparent 40%);
+}
+
+.poseChip {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--mantine-color-success-7);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.micLevel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+}
+
+.bar {
+  width: 3px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 1.5px;
+  transition: height var(--duration) var(--ease-in-out);
+}
+
+.barOn {
+  background: var(--mantine-color-brand-3);
+  animation: barWave 1.2s var(--ease-in-out) infinite;
+}
+
+@keyframes barWave {
+  0%, 100% {
+    height: 6px;
+    opacity: 0.7;
+  }
+  50% {
+    height: 18px;
+    opacity: 1;
+  }
+}
+
+.interviewerStrip {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+}
+
+.panel {
+  background: white;
+  border: 1px solid var(--mantine-color-gray-2);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.questionSection {
+  padding: 22px 24px 24px;
+  animation: questionEnter var(--duration-lg) var(--ease-out);
+}
+
+@keyframes questionEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.transcriptSection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 24px 18px;
+  min-height: 0;
+}
+
+.recIndicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: softPulse 1.2s var(--ease-in-out) infinite;
+}
+
+@keyframes softPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.cursor {
+  display: inline-block;
+  width: 1px;
+  margin-left: 2px;
+  color: var(--mantine-color-brand-6);
+  animation: blink 1.05s steps(2) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}

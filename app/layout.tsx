@@ -1,21 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { MantineProvider, ColorSchemeScript } from "@mantine/core";
+import { MantineProvider, ColorSchemeScript, Box } from "@mantine/core";
+import { TopNav } from "./components/TopNav";
+import { theme } from "./theme";
+import "@mantine/core/styles.css";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "PreQ",
-  description: "PreQ Application",
+  title: "AI 면접 코치",
+  description: "멀티 에이전트 모의면접 — 회사 분석부터 리포트까지",
 };
 
 export default function RootLayout({
@@ -24,16 +16,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      suppressHydrationWarning
-    >
+    <html lang="ko" suppressHydrationWarning>
       <head>
-        <ColorSchemeScript />
+        <ColorSchemeScript defaultColorScheme="light" />
       </head>
-      <body className="min-h-full flex flex-col">
-        <MantineProvider>{children}</MantineProvider>
+      <body>
+        <MantineProvider theme={theme} defaultColorScheme="light">
+          <TopNav />
+          <Box pt={56}>{children}</Box>
+        </MantineProvider>
       </body>
     </html>
   );
