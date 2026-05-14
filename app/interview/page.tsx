@@ -63,7 +63,11 @@ export default function InterviewPage() {
   const [recording, setRecording] = useState(true);
   const [cameraOn, setCameraOn] = useState(true);
   const [transcript, setTranscript] = useState("");
+  const [camError, setCamError] = useState<string | null>(null);
+  const [camReady, setCamReady] = useState(false);
   const tickRef = useRef<number | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const current = questions[qIndex];
 
@@ -86,6 +90,63 @@ export default function InterviewPage() {
       if (tickRef.current) window.clearInterval(tickRef.current);
     };
   }, [recording, qIndex]);
+
+  useEffect(() => {
+    if (!cameraOn) {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCamReady(false);
+      setCamError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCamError(null);
+    setCamReady(false);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamError("이 브라우저는 카메라 접근을 지원하지 않아요");
+      return;
+    }
+
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "user" }, audio: false })
+      .then((stream) => {
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current
+            .play()
+            .then(() => setCamReady(true))
+            .catch(() => setCamReady(true));
+        }
+      })
+      .catch((err: DOMException) => {
+        if (cancelled) return;
+        if (err.name === "NotAllowedError") {
+          setCamError("카메라 권한이 거부되었어요");
+        } else if (err.name === "NotFoundError") {
+          setCamError("연결된 카메라를 찾을 수 없어요");
+        } else {
+          setCamError("카메라를 열 수 없어요");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [cameraOn]);
 
   const next = () => {
     if (qIndex < questions.length - 1) {
@@ -132,17 +193,35 @@ export default function InterviewPage() {
       <Box className={classes.main}>
         <Box className={classes.camArea}>
           <Box className={classes.camFeed}>
-            {cameraOn ? (
-              <Stack align="center" gap={4} c="gray.5">
-                <IconUser size={64} stroke={1} />
-                <Text fz="xs" c="gray.5">
-                  카메라 미리보기
-                </Text>
-              </Stack>
-            ) : (
+            <video
+              ref={videoRef}
+              className={classes.video}
+              data-on={cameraOn && camReady && !camError ? "true" : undefined}
+              autoPlay
+              muted
+              playsInline
+            />
+            {!cameraOn && (
               <Stack align="center" gap={4} c="gray.6">
                 <IconVideoOff size={48} stroke={1.5} />
                 <Text fz="xs">카메라 꺼짐</Text>
+              </Stack>
+            )}
+            {cameraOn && camError && (
+              <Stack align="center" gap={6} c="red.4" px="md" maw={320}>
+                <IconAlertCircle size={48} stroke={1.5} />
+                <Text fz="sm" fw={600} ta="center">
+                  {camError}
+                </Text>
+                <Text fz="xs" c="gray.5" ta="center">
+                  주소창의 자물쇠 아이콘에서 카메라 권한을 허용해 주세요
+                </Text>
+              </Stack>
+            )}
+            {cameraOn && !camError && !camReady && (
+              <Stack align="center" gap={4} c="gray.6">
+                <IconVideo size={32} stroke={1.5} />
+                <Text fz="xs">카메라 연결 중…</Text>
               </Stack>
             )}
 
