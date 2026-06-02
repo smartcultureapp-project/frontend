@@ -76,6 +76,8 @@ export type ResumeAnalysis = {
   id: string;
   userId: string;
   rawText: string;
+  fileName: string | null;
+  fileType: string | null;
   summary: ResumeSummary | null;
   createdAt: string;
   updatedAt: string;
@@ -90,13 +92,30 @@ export type CategoryScores = {
   companyFit: number;
 };
 
+// 면접관 내부 토론 발언 (3단계)
+export type DiscussionTurn = {
+  interviewerId: string;
+  comment: string;
+};
+
+// 면접관별 독립 채점 (4단계)
+export type InterviewerScore = {
+  interviewerId: string;
+  score: number;
+  comment: string;
+};
+
 export type InterviewTurn = {
   id: string;
   sessionId: string;
   question: string | null;
+  questionType: string | null;
+  interviewerId: string | null;
+  discussion: DiscussionTurn[] | null;
   answer: string | null;
   score: number | null;
   categoryScores: CategoryScores | null;
+  scoreBreakdown: InterviewerScore[] | null;
   feedbackGood: string | null;
   feedbackImprove: string | null;
   betterAnswer: string | null;
@@ -107,6 +126,10 @@ export type InterviewTurn = {
 export type NextQuestion = {
   turnId: string;
   question: string | null;
+  interviewerId: string | null;
+  interviewer: string | null;
+  questionType: string | null;
+  discussion: DiscussionTurn[] | null;
   turnIndex: number | null;
 };
 
@@ -114,9 +137,36 @@ export type AnswerFeedback = {
   turnId: string;
   score: number | null;
   categoryScores: CategoryScores | null;
+  scoreBreakdown: InterviewerScore[] | null;
   feedbackGood: string | null;
   feedbackImprove: string | null;
   betterAnswer: string | null;
+};
+
+// 2단계: 이력서 기반 맞춤 예상 질문
+export type ExpectedQuestion = {
+  category: string;
+  text: string;
+  basis: string;
+};
+
+export type ExpectedQuestions = {
+  questions: ExpectedQuestion[];
+};
+
+// 4-2단계: 최종 총평 리포트
+export type InterviewerReview = {
+  interviewerId: string;
+  summary: string;
+  strengths: string[];
+  concerns: string[];
+};
+
+export type FinalReport = {
+  overallScore: number;
+  recommendation: string;
+  interviewerReviews: InterviewerReview[];
+  overallSummary: string;
 };
 
 // 평가 템플릿 (evaluation-template.types.ts)

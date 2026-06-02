@@ -102,6 +102,10 @@ export default function InterviewPage() {
           setCurrent({
             turnId: pending.id,
             question: pending.question,
+            interviewerId: pending.interviewerId,
+            interviewer: null,
+            questionType: pending.questionType,
+            discussion: pending.discussion,
             turnIndex: pending.turnIndex,
           });
         } else {

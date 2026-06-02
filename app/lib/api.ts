@@ -9,6 +9,8 @@ import type {
   AuthTokenResponse,
   CompanyAnalysis,
   EvaluationTemplate,
+  ExpectedQuestions,
+  FinalReport,
   InterviewTurn,
   NextQuestion,
   ResumeAnalysis,
@@ -234,10 +236,30 @@ export const analysis = {
 // ---------------------------------------------------------------------------
 
 export const resume = {
-  create: (body: { rawText: string; sessionId?: string }) =>
-    request<ResumeAnalysis>("/resume", { method: "POST", body }),
+  create: (body: {
+    rawText: string;
+    sessionId?: string;
+    fileName?: string;
+    fileType?: string;
+    fileData?: string;
+  }) => request<ResumeAnalysis>("/resume", { method: "POST", body }),
   list: () => request<ResumeAnalysis[]>("/resume"),
   get: (id: string) => request<ResumeAnalysis>(`/resume/${id}`),
+  // 요약이 비어있는(과거 실패) 이력서 재분석 트리거
+  reanalyze: (id: string) =>
+    request<ResumeAnalysis>(`/resume/${id}/reanalyze`, { method: "POST" }),
+
+  // 저장된 원본 파일을 인증 포함으로 받아 blob URL 로 반환 (새 탭으로 열기용)
+  fileBlobUrl: async (id: string): Promise<string> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/resume/${id}/file`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      throw new ApiError(res.status, "원본 파일을 불러오지 못했습니다.");
+    }
+    return URL.createObjectURL(await res.blob());
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -269,6 +291,18 @@ export const sessions = {
       method: "POST",
       body: { answer },
     }),
+
+  // 4-2단계: 최종 면접 리포트 생성·저장
+  generateReport: (id: string) =>
+    request<FinalReport>(`/sessions/${id}/interview/report`, {
+      method: "POST",
+    }),
+
+  // 2단계: 이력서 + 회사 분석 기반 맞춤 예상 질문 (캐시)
+  expectedQuestions: (id: string, refresh = false) =>
+    request<ExpectedQuestions>(
+      `/sessions/${id}/expected-questions${refresh ? "?refresh=true" : ""}`,
+    ),
 };
 
 // ---------------------------------------------------------------------------

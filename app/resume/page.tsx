@@ -26,10 +26,18 @@ import { PageHeader } from "../components/PageHeader";
 import { PageContainer } from "../components/PageContainer";
 import { StepFooter } from "../components/StepFooter";
 import classes from "./resume.module.css";
-import { resume, evaluation, analysis, ensureAuth, ApiError } from "../lib/api";
+import {
+  resume,
+  evaluation,
+  analysis,
+  sessions,
+  ensureAuth,
+  ApiError,
+} from "../lib/api";
 import { getSessionId, getResumeId, setResumeId } from "../lib/store";
 import type {
   ResumeAnalysis,
+  ResumeSummary,
   EvaluationTemplate,
   CompanyAnalysis,
 } from "../lib/types";
@@ -75,6 +83,11 @@ function buildRubric(tmpl: EvaluationTemplate | null): RubricRow[] {
   return rows;
 }
 
+// 요약이 정상 구조(객체 + profile)인지 — 과거 XML 누출로 저장된 깨진 문자열을 걸러낸다
+function hasValidSummary(s: unknown): s is ResumeSummary {
+  return !!s && typeof s === "object" && "profile" in s;
+}
+
 export default function ResumePage() {
   const [sessionId, setSid] = useState<string | null>(null);
   const [rawText, setRawText] = useState("");
@@ -88,8 +101,9 @@ export default function ResumePage() {
   const [resumeData, setResumeData] = useState<ResumeAnalysis | null>(null);
   const [rubric, setRubric] = useState<RubricRow[]>([]);
   const [questions, setQuestions] = useState<
-    { category: string; text: string }[]
+    { category: string; text: string; basis?: string }[]
   >([]);
+  const [questionsLoading, setQuestionsLoading] = useState(false);
   const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -107,19 +121,29 @@ export default function ResumePage() {
       })
       .catch(() => {});
 
-    analysis
-      .get(sid)
-      .then((a: CompanyAnalysis) => {
-        const qs: { category: string; text: string }[] = [];
-        (a.actualQuestions ?? []).forEach((q) =>
-          qs.push({ category: "기출", text: q }),
-        );
-        (a.recommendedQuestionAngles ?? []).forEach((q) =>
-          qs.push({ category: "추천 각도", text: q }),
-        );
-        setQuestions(qs);
+    // 이력서 + 회사 분석 기반 맞춤 예상 질문 (실패 시 회사 기출로 폴백)
+    setQuestionsLoading(true);
+    sessions
+      .expectedQuestions(sid)
+      .then((res) => {
+        if (res.questions?.length) setQuestions(res.questions);
       })
-      .catch(() => {});
+      .catch(async () => {
+        try {
+          const a: CompanyAnalysis = await analysis.get(sid);
+          const qs: { category: string; text: string }[] = [];
+          (a.actualQuestions ?? []).forEach((q) =>
+            qs.push({ category: "기출", text: q }),
+          );
+          (a.recommendedQuestionAngles ?? []).forEach((q) =>
+            qs.push({ category: "추천 각도", text: q }),
+          );
+          setQuestions(qs);
+        } catch {
+          /* 무시 */
+        }
+      })
+      .finally(() => setQuestionsLoading(false));
 
     // 이미 등록한 이력서가 있으면 요약을 다시 불러온다.
     const rid = getResumeId();
@@ -130,8 +154,13 @@ export default function ResumePage() {
           setResumeData(r);
           setRawText(r.rawText);
           setRegistered(true);
-          if (r.summary) setSummaryReady(true);
-          else pollSummary(rid);
+          if (hasValidSummary(r.summary)) {
+            setSummaryReady(true);
+          } else {
+            // 요약이 비었거나 깨진(과거 XML 누출) 경우 재분석을 한 번 트리거한 뒤 폴링
+            resume.reanalyze(rid).catch(() => {});
+            pollSummary(rid);
+          }
         })
         .catch(() => {});
     }
@@ -150,7 +179,7 @@ export default function ResumePage() {
       attempts += 1;
       try {
         const r = await resume.get(id);
-        if (r.summary) {
+        if (hasValidSummary(r.summary)) {
           setResumeData(r);
           setSummaryReady(true);
           if (pollRef.current) window.clearInterval(pollRef.current);
@@ -198,14 +227,34 @@ export default function ResumePage() {
     setError(null);
     setSummaryReady(false);
     try {
+      // 업로드한 원본 파일을 base64 로 함께 저장 (있을 때만)
+      let fileFields: {
+        fileName?: string;
+        fileType?: string;
+        fileData?: string;
+      } = {};
+      if (file) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+        fileFields = {
+          fileName: file.name,
+          fileType: file.type || "application/octet-stream",
+          fileData: dataUrl.split(",")[1] ?? "",
+        };
+      }
       const created = await resume.create({
         rawText: rawText.trim(),
         sessionId: sessionId ?? undefined,
+        ...fileFields,
       });
       setResumeId(created.id);
       setResumeData(created);
       setRegistered(true); // rawText 저장·세션 연결 완료 → 면접 시작 가능
-      if (created.summary) setSummaryReady(true);
+      if (hasValidSummary(created.summary)) setSummaryReady(true);
       else pollSummary(created.id);
     } catch (err) {
       setError(
@@ -218,7 +267,8 @@ export default function ResumePage() {
     }
   };
 
-  const summary = resumeData?.summary;
+  const rawSummary = resumeData?.summary;
+  const summary = hasValidSummary(rawSummary) ? rawSummary : null;
 
   return (
     <PageContainer size="lg">
@@ -364,10 +414,70 @@ export default function ResumePage() {
               variant="light"
               icon={<IconCheck size={16} />}
             >
-              <Text fz="sm">
-                이력서가 등록되었어요. 지금 바로 <b>면접을 시작</b>할 수 있고,
-                아래 AI 요약은 준비되는 대로 표시됩니다.
-              </Text>
+              <Stack gap={6}>
+                <Text fz="sm">
+                  이력서가 등록되었어요. 지금 바로 <b>면접을 시작</b>할 수 있고,
+                  아래 AI 요약은 준비되는 대로 표시됩니다.
+                </Text>
+                {(() => {
+                  const profile = resumeData?.summary?.profile;
+                  const fileName = resumeData?.fileName;
+                  const title =
+                    profile?.name || profile?.title
+                      ? [profile?.name, profile?.title]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : null;
+                  // 파일이 없으면 원본 텍스트 덩어리 대신 깔끔한 라벨을 보여준다
+                  const label =
+                    fileName ?? title ?? "텍스트로 등록됨";
+                  return (
+                    <Group gap={8} wrap="nowrap" align="center">
+                      {fileName ? (
+                        <IconFileText
+                          size={14}
+                          color="var(--mantine-color-green-8)"
+                          style={{ flexShrink: 0 }}
+                        />
+                      ) : null}
+                      <Text
+                        fz="xs"
+                        fw={700}
+                        c="green.8"
+                        style={{ flexShrink: 0 }}
+                      >
+                        등록된 이력서
+                      </Text>
+                      <Text fz="xs" c="dark.5" truncate>
+                        {label}
+                        {rawText
+                          ? ` · ${rawText.length.toLocaleString()}자`
+                          : ""}
+                      </Text>
+                      {resumeData?.fileName && resumeData?.id && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="green"
+                          style={{ flexShrink: 0 }}
+                          onClick={async () => {
+                            try {
+                              const url = await resume.fileBlobUrl(
+                                resumeData.id,
+                              );
+                              window.open(url, "_blank", "noopener");
+                            } catch {
+                              setError("원본 파일을 불러오지 못했습니다.");
+                            }
+                          }}
+                        >
+                          파일 보기
+                        </Button>
+                      )}
+                    </Group>
+                  );
+                })()}
+              </Stack>
             </Alert>
           )}
 
@@ -381,10 +491,26 @@ export default function ResumePage() {
           )}
 
           {summaryTimedOut && !summaryReady && (
-            <Text fz="xs" c="dimmed">
-              AI 요약 생성이 지연되고 있어요. 요약 없이도 면접은 바로 시작할 수
-              있습니다.
-            </Text>
+            <Group gap={10} align="center">
+              <Text fz="xs" c="dimmed">
+                AI 요약 생성이 지연되고 있어요. 요약 없이도 면접은 바로 시작할 수
+                있습니다.
+              </Text>
+              {resumeData?.id && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="brand"
+                  onClick={() => {
+                    const id = resumeData.id;
+                    resume.reanalyze(id).catch(() => {});
+                    pollSummary(id);
+                  }}
+                >
+                  다시 시도
+                </Button>
+              )}
+            </Group>
           )}
         </Stack>
 
@@ -470,17 +596,27 @@ export default function ResumePage() {
           </Stack>
         )}
 
-        {questions.length > 0 && (
+        {(questionsLoading || questions.length > 0) && (
           <Stack gap={0}>
             <Group justify="space-between" align="end" mb="xs">
               <Text fz="md" fw={700}>
-                예상 질문
+                맞춤 예상 질문
               </Text>
               <Text fz="xs" c="dimmed" ff="monospace">
-                {questions.length} QUESTIONS
+                {questions.length > 0
+                  ? `${questions.length} QUESTIONS`
+                  : "생성 중…"}
               </Text>
             </Group>
             <Divider />
+            {questionsLoading && questions.length === 0 && (
+              <Group gap={8} py="md">
+                <Loader size={12} color="brand" />
+                <Text fz="xs" c="dimmed">
+                  이력서와 회사 분석을 바탕으로 맞춤 질문을 만드는 중입니다…
+                </Text>
+              </Group>
+            )}
             {questions.map((q, i) => (
               <Box key={i}>
                 <Box className={classes.row}>
@@ -513,6 +649,11 @@ export default function ResumePage() {
                       <Text fz="sm" lh={1.6}>
                         {q.text}
                       </Text>
+                      {q.basis && (
+                        <Text fz="xs" c="dimmed" lh={1.5}>
+                          근거: {q.basis}
+                        </Text>
+                      )}
                     </Stack>
                   </Group>
                 </Box>
