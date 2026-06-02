@@ -107,6 +107,10 @@
   font-weight: 600;
 }
 
+.poseChip[data-warn="true"] {
+  color: var(--mantine-color-orange-7);
+}
+
 .micLevel {
   position: absolute;
   top: 16px;

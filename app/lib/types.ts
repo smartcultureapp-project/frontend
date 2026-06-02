@@ -22,6 +22,7 @@ export type Session = {
   companyAnalysisId: string | null;
   resumeAnalysisId: string | null;
   evaluationSheetId: string | null;
+  finalReport: FinalReport | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -116,6 +117,7 @@ export type InterviewTurn = {
   score: number | null;
   categoryScores: CategoryScores | null;
   scoreBreakdown: InterviewerScore[] | null;
+  speechMetrics: SpeechMetrics | null;
   feedbackGood: string | null;
   feedbackImprove: string | null;
   betterAnswer: string | null;
@@ -138,9 +140,20 @@ export type AnswerFeedback = {
   score: number | null;
   categoryScores: CategoryScores | null;
   scoreBreakdown: InterviewerScore[] | null;
+  speechMetrics: SpeechMetrics | null;
   feedbackGood: string | null;
   feedbackImprove: string | null;
   betterAnswer: string | null;
+};
+
+// 5단계: STT 발화 지표 (Deepgram)
+export type SpeechMetrics = {
+  transcript: string;
+  durationSec: number;
+  wordCount: number;
+  wordsPerMin: number;
+  fillerCount: number;
+  pauseCount: number;
 };
 
 // 2단계: 이력서 기반 맞춤 예상 질문

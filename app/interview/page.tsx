@@ -28,37 +28,27 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import classes from "./interview.module.css";
-import { sessions, ensureAuth, ApiError } from "../lib/api";
+import { sessions, stt, ensureAuth, ApiError } from "../lib/api";
 import { getSessionId } from "../lib/store";
-import type { AnswerFeedback, NextQuestion } from "../lib/types";
+import { usePosture } from "../lib/usePosture";
+import type {
+  AnswerFeedback,
+  NextQuestion,
+  SpeechMetrics,
+} from "../lib/types";
 
+// 백엔드 interview-panel.ts 와 동일한 면접관 패널 (id: lead/tech/hr)
 const interviewers = [
-  { id: "A", name: "김주현", role: "주면접관" },
-  { id: "B", name: "박지훈", role: "기술면접관" },
-  { id: "C", name: "이수민", role: "인사담당관" },
+  { id: "lead", name: "주면접관", short: "주" },
+  { id: "tech", name: "기술면접관", short: "기" },
+  { id: "hr", name: "인사담당관", short: "인" },
 ];
 
-const TOTAL_QUESTIONS = 10;
+function interviewerName(id: string | null | undefined): string {
+  return interviewers.find((p) => p.id === id)?.name ?? "면접관";
+}
 
-// 브라우저 SpeechRecognition (표준 타입 미제공 → 최소 정의)
-type SpeechResult = { isFinal: boolean; 0: { transcript: string } };
-type SpeechRecognitionEvent = {
-  resultIndex: number;
-  results: ArrayLike<SpeechResult>;
-};
-type SpeechRecognitionLike = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((e: SpeechRecognitionEvent) => void) | null;
-  onend: (() => void) | null;
-};
-type SpeechWindow = {
-  SpeechRecognition?: new () => SpeechRecognitionLike;
-  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-};
+const TOTAL_QUESTIONS = 10;
 
 export default function InterviewPage() {
   const router = useRouter();
@@ -79,7 +69,15 @@ export default function InterviewPage() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+
+  const [transcribing, setTranscribing] = useState(false);
+  const [sttMetrics, setSttMetrics] = useState<SpeechMetrics | null>(null);
+
+  // 실제 자세 감지 (MediaPipe) — 카메라가 켜지고 준비됐을 때만
+  const posture = usePosture(videoRef, cameraOn && camReady && !camError);
 
   // 세션 로드 + 진행 중인 질문 복구(없으면 첫 질문 생성)
   useEffect(() => {
@@ -174,37 +172,59 @@ export default function InterviewPage() {
   }, [cameraOn]);
 
   // 음성 인식 (지원 시) — 인식 결과를 답변 텍스트에 이어붙임
-  const toggleRecording = () => {
+  // 답변 녹음 → 멈추면 Deepgram STT 로 전사 + 발화 지표(속도/필러/멈칫) 산출
+  const toggleRecording = async () => {
     if (recording) {
-      recognitionRef.current?.stop();
+      mediaRecorderRef.current?.stop(); // onstop 에서 전사 진행
       setRecording(false);
       return;
     }
 
-    const w = window as unknown as SpeechWindow;
-    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
-    if (!SR) {
-      setError(
-        "이 브라우저는 음성 인식을 지원하지 않습니다. 아래 입력창에 직접 답변을 작성해 주세요.",
-      );
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("이 브라우저는 녹음을 지원하지 않습니다. 아래 입력창에 직접 작성해 주세요.");
       return;
     }
 
-    const rec = new SR();
-    rec.lang = "ko-KR";
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.onresult = (e: SpeechRecognitionEvent) => {
-      let chunk = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) chunk += e.results[i][0].transcript;
-      }
-      if (chunk) setAnswer((prev) => (prev ? `${prev} ${chunk}` : chunk).trim());
-    };
-    rec.onend = () => setRecording(false);
-    recognitionRef.current = rec;
-    rec.start();
-    setRecording(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const m = await stt.transcribe(blob);
+          setSttMetrics(m);
+          if (m.transcript) {
+            setAnswer((prev) =>
+              prev ? `${prev} ${m.transcript}`.trim() : m.transcript,
+            );
+          }
+        } catch (err) {
+          setError(
+            err instanceof ApiError ? err.message : "음성 인식에 실패했습니다.",
+          );
+        } finally {
+          setTranscribing(false);
+        }
+      };
+
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setError("마이크 권한이 필요합니다.");
+    }
   };
 
   const loadNextQuestion = async (sid: string) => {
@@ -227,13 +247,17 @@ export default function InterviewPage() {
   const submitAnswer = async () => {
     if (!sessionId || !answer.trim()) return;
     if (recording) {
-      recognitionRef.current?.stop();
+      mediaRecorderRef.current?.stop();
       setRecording(false);
     }
     setSubmitting(true);
     setError(null);
     try {
-      const fb = await sessions.submitAnswer(sessionId, answer.trim());
+      const fb = await sessions.submitAnswer(
+        sessionId,
+        answer.trim(),
+        sttMetrics ?? undefined,
+      );
       setFeedback(fb);
       setAnsweredCount((c) => c + 1);
     } catch (err) {
@@ -337,12 +361,30 @@ export default function InterviewPage() {
               </Stack>
             )}
 
-            <Box className={classes.poseChip}>
-              <IconCheck size={12} />
-              <Text fz="xs" fw={600}>
-                자세 양호
-              </Text>
-            </Box>
+            {cameraOn && camReady && !camError && posture.status !== "loading" && (
+              <Box
+                className={classes.poseChip}
+                data-warn={posture.status !== "good" ? "true" : undefined}
+              >
+                {posture.status === "good" ? (
+                  <>
+                    <IconCheck size={12} />
+                    <Text fz="xs" fw={600}>
+                      자세 양호
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <IconAlertCircle size={12} />
+                    <Text fz="xs" fw={600}>
+                      {posture.status === "no_face"
+                        ? "얼굴이 보이지 않아요"
+                        : posture.hint}
+                    </Text>
+                  </>
+                )}
+              </Box>
+            )}
 
             <Box className={classes.micLevel}>
               {[0.1, 0.2, 0.15, 0.05, 0.12].map((d, i) => (
@@ -355,18 +397,31 @@ export default function InterviewPage() {
             </Box>
 
             <Box className={classes.interviewerStrip}>
-              {interviewers.map((p) => (
-                <Tooltip key={p.id} label={`${p.name} · ${p.role}`} withArrow>
-                  <Avatar
-                    size="md"
-                    radius="xl"
-                    color="dark"
-                    styles={{ placeholder: { fontWeight: 700 } }}
+              {interviewers.map((p) => {
+                const active = current?.interviewerId === p.id;
+                return (
+                  <Tooltip
+                    key={p.id}
+                    label={active ? `${p.name} · 질문 중` : p.name}
+                    withArrow
                   >
-                    {p.id}
-                  </Avatar>
-                </Tooltip>
-              ))}
+                    <Avatar
+                      size="md"
+                      radius="xl"
+                      color={active ? "brand" : "dark"}
+                      variant={active ? "filled" : "light"}
+                      styles={{
+                        placeholder: { fontWeight: 700 },
+                        root: active
+                          ? { outline: "2px solid var(--mantine-color-brand-4)" }
+                          : { opacity: 0.55 },
+                      }}
+                    >
+                      {p.short}
+                    </Avatar>
+                  </Tooltip>
+                );
+              })}
             </Box>
           </Box>
 
@@ -413,20 +468,27 @@ export default function InterviewPage() {
           )}
 
           <Box className={classes.questionSection} key={current?.turnId}>
-            <Text
-              fz={11}
-              c="brand.6"
-              fw={700}
-              ff="monospace"
-              style={{ letterSpacing: 1 }}
-            >
-              Q{String(number).padStart(2, "0")}
-            </Text>
+            <Group gap={8} align="center">
+              <Text
+                fz={11}
+                c="brand.6"
+                fw={700}
+                ff="monospace"
+                style={{ letterSpacing: 1 }}
+              >
+                Q{String(number).padStart(2, "0")}
+              </Text>
+              {!loadingQ && current?.interviewerId && (
+                <Text fz={11} c="dimmed" fw={600}>
+                  · {interviewerName(current.interviewerId)} 질문
+                </Text>
+              )}
+            </Group>
             {loadingQ ? (
               <Group gap={8} mt={10}>
                 <Loader size={16} color="brand" />
                 <Text fz="sm" c="dimmed">
-                  질문 생성 중…
+                  면접관들이 상의해 다음 질문을 정하는 중…
                 </Text>
               </Group>
             ) : (
@@ -434,6 +496,34 @@ export default function InterviewPage() {
                 {current?.question ?? "질문을 불러오는 중입니다."}
               </Text>
             )}
+
+            {!loadingQ &&
+              current?.discussion &&
+              current.discussion.length > 0 && (
+                <Box
+                  mt={14}
+                  p={12}
+                  style={{
+                    background: "var(--mantine-color-gray-0)",
+                    border: "1px solid var(--mantine-color-gray-2)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text fz={10} c="dimmed" fw={700} mb={6} style={{ letterSpacing: 0.5 }}>
+                    면접관 내부 논의
+                  </Text>
+                  <Stack gap={5}>
+                    {current.discussion.map((d, i) => (
+                      <Text key={i} fz="xs" c="dark.5" lh={1.5}>
+                        <Text component="span" fw={700} c="dark.7">
+                          {interviewerName(d.interviewerId)}
+                        </Text>
+                        : {d.comment}
+                      </Text>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
           </Box>
 
           <Divider />
@@ -546,6 +636,62 @@ export default function InterviewPage() {
                 styles={{ input: { fontSize: 14, lineHeight: 1.75 } }}
                 disabled={submitting || !current}
               />
+
+              {recording && (
+                <Group gap={8} c="red">
+                  <Box
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 8,
+                      background: "var(--mantine-color-red-6)",
+                    }}
+                  />
+                  <Text fz="xs" fw={600}>
+                    녹음 중… 다시 누르면 음성을 텍스트로 변환합니다
+                  </Text>
+                </Group>
+              )}
+              {transcribing && (
+                <Group gap={8}>
+                  <Loader size={12} color="brand" />
+                  <Text fz="xs" c="dimmed">
+                    음성을 텍스트로 변환하는 중…
+                  </Text>
+                </Group>
+              )}
+              {sttMetrics && !recording && !transcribing && (
+                <Group gap="md" wrap="wrap">
+                  <Text fz="xs" c="dimmed">
+                    말 속도{" "}
+                    <Text component="span" fw={700} c="dark.7" inherit>
+                      {sttMetrics.wordsPerMin} WPM
+                    </Text>
+                  </Text>
+                  <Text fz="xs" c="dimmed">
+                    더듬·추임새{" "}
+                    <Text
+                      component="span"
+                      fw={700}
+                      c={sttMetrics.fillerCount > 3 ? "orange.7" : "dark.7"}
+                      inherit
+                    >
+                      {sttMetrics.fillerCount}회
+                    </Text>
+                  </Text>
+                  <Text fz="xs" c="dimmed">
+                    멈칫{" "}
+                    <Text
+                      component="span"
+                      fw={700}
+                      c={sttMetrics.pauseCount > 3 ? "orange.7" : "dark.7"}
+                      inherit
+                    >
+                      {sttMetrics.pauseCount}회
+                    </Text>
+                  </Text>
+                </Group>
+              )}
               <Group
                 justify="space-between"
                 mt="md"

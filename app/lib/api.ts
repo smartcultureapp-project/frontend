@@ -12,6 +12,7 @@ import type {
   ExpectedQuestions,
   FinalReport,
   InterviewTurn,
+  SpeechMetrics,
   NextQuestion,
   ResumeAnalysis,
   Session,
@@ -286,10 +287,10 @@ export const sessions = {
       method: "POST",
     }),
 
-  submitAnswer: (id: string, answer: string) =>
+  submitAnswer: (id: string, answer: string, speechMetrics?: SpeechMetrics) =>
     request<AnswerFeedback>(`/sessions/${id}/interview/answer`, {
       method: "POST",
-      body: { answer },
+      body: { answer, speechMetrics },
     }),
 
   // 4-2단계: 최종 면접 리포트 생성·저장
@@ -303,6 +304,27 @@ export const sessions = {
     request<ExpectedQuestions>(
       `/sessions/${id}/expected-questions${refresh ? "?refresh=true" : ""}`,
     ),
+};
+
+// ---------------------------------------------------------------------------
+// STT (음성 → 텍스트 + 발화 지표, Deepgram)
+// ---------------------------------------------------------------------------
+
+export const stt = {
+  transcribe: async (audio: Blob): Promise<SpeechMetrics> => {
+    const token = getToken();
+    const form = new FormData();
+    form.append("audio", audio, "answer.webm");
+    const res = await fetch(`${API_URL}/stt`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      throw new ApiError(res.status, "음성 인식에 실패했습니다.");
+    }
+    return res.json();
+  },
 };
 
 // ---------------------------------------------------------------------------

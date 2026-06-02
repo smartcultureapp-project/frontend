@@ -30,12 +30,21 @@ import { PageHeader } from "../components/PageHeader";
 import { PageContainer } from "../components/PageContainer";
 import { sessions, ensureAuth, ApiError } from "../lib/api";
 import { getSessionId } from "../lib/store";
-import type { InterviewTurn } from "../lib/types";
+import type { FinalReport, InterviewTurn } from "../lib/types";
+
+const INTERVIEWER_NAMES: Record<string, string> = {
+  lead: "주면접관",
+  tech: "기술면접관",
+  hr: "인사담당관",
+};
+const interviewerName = (id: string) => INTERVIEWER_NAMES[id] ?? "면접관";
 
 export default function ReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [turns, setTurns] = useState<InterviewTurn[]>([]);
+  const [report, setReport] = useState<FinalReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -48,7 +57,25 @@ export default function ReportPage() {
       }
       try {
         const data = await sessions.listTurns(sid);
-        setTurns(data.filter((t) => t.answer));
+        const answered = data.filter((t) => t.answer);
+        setTurns(answered);
+
+        // 최종 총평: 캐시(session.finalReport) 있으면 사용, 없고 채점된 답변이 있으면 생성
+        if (answered.some((t) => t.score != null)) {
+          setReportLoading(true);
+          try {
+            const session = await sessions.get(sid);
+            if (session.finalReport) {
+              setReport(session.finalReport);
+            } else {
+              setReport(await sessions.generateReport(sid));
+            }
+          } catch {
+            /* 총평 실패해도 나머지 리포트는 표시 */
+          } finally {
+            setReportLoading(false);
+          }
+        }
       } catch (err) {
         setError(
           err instanceof ApiError
@@ -67,9 +94,17 @@ export default function ReportPage() {
     scored.length > 0
       ? scored.reduce((s, t) => s + (t.score ?? 0), 0) / scored.length
       : 0;
-  const total100 = Math.round((avg / 5) * 100);
-  const likelihood =
-    avg >= 4 ? { label: "높음", color: "success.7" }
+  // 종합 점수·합격가능성: 면접관 패널 총평(report)이 있으면 그 값을, 없으면 평균 기반 휴리스틱
+  const total100 = report?.overallScore ?? Math.round((avg / 5) * 100);
+  const recColor: Record<string, string> = {
+    강력추천: "success.7",
+    추천: "success.7",
+    보류: "yellow.7",
+    비추천: "dark.6",
+  };
+  const likelihood = report
+    ? { label: report.recommendation, color: recColor[report.recommendation] ?? "brand.6" }
+    : avg >= 4 ? { label: "높음", color: "success.7" }
     : avg >= 3 ? { label: "보통", color: "yellow.7" }
     : { label: "보완 필요", color: "dark.6" };
 
@@ -79,6 +114,29 @@ export default function ReportPage() {
   const weaknesses = turns
     .map((t) => t.feedbackImprove)
     .filter((x): x is string => !!x);
+
+  // 발화 분석(전달력): 답변별 STT 지표를 누적
+  const speechTurns = turns.filter((t) => t.speechMetrics);
+  const speech =
+    speechTurns.length > 0
+      ? {
+          count: speechTurns.length,
+          avgWpm: Math.round(
+            speechTurns.reduce(
+              (s, t) => s + (t.speechMetrics?.wordsPerMin ?? 0),
+              0,
+            ) / speechTurns.length,
+          ),
+          fillers: speechTurns.reduce(
+            (s, t) => s + (t.speechMetrics?.fillerCount ?? 0),
+            0,
+          ),
+          pauses: speechTurns.reduce(
+            (s, t) => s + (t.speechMetrics?.pauseCount ?? 0),
+            0,
+          ),
+        }
+      : null;
 
   // 역량 5축 (백엔드 CategoryScoresSchema 와 동일 순서)
   const CATEGORIES = [
@@ -192,15 +250,17 @@ export default function ReportPage() {
                   문항별 점수
                 </Text>
                 {barData.length > 0 ? (
-                  <BarChart
-                    h={200}
-                    data={barData}
-                    dataKey="q"
-                    series={[{ name: "점수", color: "brand.5" }]}
-                    yAxisProps={{ domain: [0, 5], ticks: [0, 1, 2, 3, 4, 5] }}
-                    barProps={{ radius: 4 }}
-                    gridAxis="y"
-                  />
+                  <Box style={{ width: "100%", minWidth: 0 }}>
+                    <BarChart
+                      h={200}
+                      data={barData}
+                      dataKey="q"
+                      series={[{ name: "점수", color: "brand.5" }]}
+                      yAxisProps={{ domain: [0, 5], ticks: [0, 1, 2, 3, 4, 5] }}
+                      barProps={{ radius: 4 }}
+                      gridAxis="y"
+                    />
+                  </Box>
                 ) : (
                   <Text fz="sm" c="dimmed">
                     채점된 문항이 없습니다.
@@ -220,10 +280,9 @@ export default function ReportPage() {
                   >
                     역량 분석
                   </Text>
-                  <Center>
+                  <Box style={{ width: "100%", minWidth: 0 }}>
                     <RadarChart
                       h={260}
-                      w="100%"
                       data={radarData}
                       dataKey="category"
                       series={[
@@ -232,7 +291,7 @@ export default function ReportPage() {
                       withPolarRadiusAxis
                       polarRadiusAxisProps={{ domain: [0, 5], angle: 90 }}
                     />
-                  </Center>
+                  </Box>
                 </Stack>
 
                 <Stack gap="md">
@@ -275,6 +334,148 @@ export default function ReportPage() {
                   </Paper>
                 </Stack>
               </SimpleGrid>
+            )}
+
+            {reportLoading && !report && (
+              <Group gap={10}>
+                <Loader size={14} color="brand" />
+                <Text fz="sm" c="dimmed">
+                  면접관 패널이 종합 총평을 작성하는 중입니다…
+                </Text>
+              </Group>
+            )}
+
+            {report && (
+              <Stack gap="lg">
+                <Stack gap={8}>
+                  <Text
+                    fz="xs"
+                    c="dimmed"
+                    fw={600}
+                    style={{ letterSpacing: 0.8 }}
+                  >
+                    종합 총평
+                  </Text>
+                  <Text fz="sm" c="dark.7" lh={1.7}>
+                    {report.overallSummary}
+                  </Text>
+                </Stack>
+
+                <Stack gap="md">
+                  <Text
+                    fz="xs"
+                    c="dimmed"
+                    fw={600}
+                    style={{ letterSpacing: 0.8 }}
+                  >
+                    면접관별 총평
+                  </Text>
+                  <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+                    {report.interviewerReviews.map((r) => (
+                      <Box
+                        key={r.interviewerId}
+                        p="md"
+                        style={{
+                          border: "1px solid var(--mantine-color-gray-2)",
+                          borderRadius: 10,
+                        }}
+                      >
+                        <Text fz="sm" fw={700} mb={6}>
+                          {interviewerName(r.interviewerId)}
+                        </Text>
+                        <Text fz="xs" c="dark.6" lh={1.6} mb={10}>
+                          {r.summary}
+                        </Text>
+                        {r.strengths.length > 0 && (
+                          <Stack gap={2} mb={8}>
+                            {r.strengths.map((s, i) => (
+                              <Text key={i} fz="xs" c="success.8" lh={1.5}>
+                                + {s}
+                              </Text>
+                            ))}
+                          </Stack>
+                        )}
+                        {r.concerns.length > 0 && (
+                          <Stack gap={2}>
+                            {r.concerns.map((c, i) => (
+                              <Text key={i} fz="xs" c="dark.5" lh={1.5}>
+                                − {c}
+                              </Text>
+                            ))}
+                          </Stack>
+                        )}
+                      </Box>
+                    ))}
+                  </SimpleGrid>
+                </Stack>
+              </Stack>
+            )}
+
+            {speech && (
+              <Stack gap="md">
+                <div>
+                  <Text
+                    fz="xs"
+                    c="dimmed"
+                    fw={600}
+                    style={{ letterSpacing: 0.8 }}
+                  >
+                    발화 분석 (전달력)
+                  </Text>
+                  <Text fz={11} c="dimmed" mt={2}>
+                    음성 답변 {speech.count}개 기준 · 무엇을 말했는지가 아니라
+                    어떻게 말했는지(속도·군말·망설임)를 봅니다
+                  </Text>
+                </div>
+                <SimpleGrid cols={{ base: 3 }} spacing="md">
+                  {[
+                    {
+                      label: "평균 말 속도",
+                      value: `${speech.avgWpm}`,
+                      unit: "WPM",
+                      warn: speech.avgWpm > 160 || speech.avgWpm < 70,
+                    },
+                    {
+                      label: "더듬·추임새",
+                      value: `${speech.fillers}`,
+                      unit: "회",
+                      warn: speech.fillers > 8,
+                    },
+                    {
+                      label: "멈칫(망설임)",
+                      value: `${speech.pauses}`,
+                      unit: "회",
+                      warn: speech.pauses > 8,
+                    },
+                  ].map((m) => (
+                    <Box
+                      key={m.label}
+                      p="md"
+                      style={{
+                        border: "1px solid var(--mantine-color-gray-2)",
+                        borderRadius: 10,
+                      }}
+                    >
+                      <Text fz="xs" c="dimmed" mb={6}>
+                        {m.label}
+                      </Text>
+                      <Group gap={4} align="baseline">
+                        <Text
+                          fz={26}
+                          fw={800}
+                          c={m.warn ? "orange.7" : "brand.6"}
+                          style={{ lineHeight: 1 }}
+                        >
+                          {m.value}
+                        </Text>
+                        <Text fz="xs" c="dimmed">
+                          {m.unit}
+                        </Text>
+                      </Group>
+                    </Box>
+                  ))}
+                </SimpleGrid>
+              </Stack>
             )}
 
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing={48}>
@@ -402,6 +603,18 @@ export default function ReportPage() {
                         <Text fz="sm" c="dark.5" lh={1.6}>
                           − {t.feedbackImprove}
                         </Text>
+                      )}
+                      {t.scoreBreakdown && t.scoreBreakdown.length > 0 && (
+                        <Group gap="md" wrap="wrap">
+                          {t.scoreBreakdown.map((b) => (
+                            <Text key={b.interviewerId} fz="xs" c="dimmed">
+                              {interviewerName(b.interviewerId)}{" "}
+                              <Text component="span" fw={700} c="brand.6" inherit>
+                                {b.score}/5
+                              </Text>
+                            </Text>
+                          ))}
+                        </Group>
                       )}
                       {t.betterAnswer && (
                         <Box
