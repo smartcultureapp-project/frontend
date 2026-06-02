@@ -49,7 +49,12 @@ export default function ReportPage() {
   useEffect(() => {
     (async () => {
       await ensureAuth().catch(() => {});
-      const sid = getSessionId();
+      // 기록 페이지에서 ?session= 으로 특정 과거 리포트를 열 수 있다
+      const fromQuery =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("session")
+          : null;
+      const sid = fromQuery || getSessionId();
       if (!sid) {
         setError("리포트를 표시할 세션이 없습니다. 면접을 먼저 진행해 주세요.");
         setLoading(false);

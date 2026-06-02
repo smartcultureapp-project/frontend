@@ -2,35 +2,12 @@
   display: block;
   padding: 24px 4px;
   color: inherit;
-  text-decoration: none;
-  transition: background var(--duration-sm) var(--ease-out);
   border-radius: 4px;
   margin: 0 -4px;
   padding-left: 8px;
   padding-right: 8px;
 }
 
-.stepRow:hover {
-  background: var(--mantine-color-gray-0);
-}
-
-.stepRow:hover .stepNum {
-  color: var(--mantine-color-brand-6);
-}
-
-.stepRow:hover .chevron {
-  transform: translate(3px, -3px);
-  color: var(--mantine-color-brand-6);
-}
-
 .stepNum {
-  transition: color var(--duration-sm) var(--ease-out);
-}
-
-.chevron {
-  display: inline-flex;
-  transition:
-    transform var(--duration) var(--ease-out),
-    color var(--duration-sm) var(--ease-out);
-  color: var(--mantine-color-gray-5);
+  color: var(--mantine-color-dimmed);
 }

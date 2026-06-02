@@ -121,7 +121,34 @@ export default function ResumePage() {
       })
       .catch(() => {});
 
-    // 이력서 + 회사 분석 기반 맞춤 예상 질문 (실패 시 회사 기출로 폴백)
+    // 이미 등록한 이력서가 있을 때만 맞춤 예상 질문을 불러온다(이력서 없으면 생성 안 함).
+    const rid = getResumeId();
+    if (rid) {
+      resume
+        .get(rid)
+        .then((r) => {
+          setResumeData(r);
+          setRawText(r.rawText);
+          setRegistered(true);
+          loadExpectedQuestions(sid);
+          if (hasValidSummary(r.summary)) {
+            setSummaryReady(true);
+          } else {
+            // 요약이 비었거나 깨진(과거 XML 누출) 경우 재분석을 한 번 트리거한 뒤 폴링
+            resume.reanalyze(rid).catch(() => {});
+            pollSummary(rid);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, []);
+
+  // 이력서 + 회사 분석 기반 맞춤 예상 질문 (이력서 등록 후에만 호출)
+  const loadExpectedQuestions = (sid: string) => {
     setQuestionsLoading(true);
     sessions
       .expectedQuestions(sid)
@@ -144,31 +171,7 @@ export default function ResumePage() {
         }
       })
       .finally(() => setQuestionsLoading(false));
-
-    // 이미 등록한 이력서가 있으면 요약을 다시 불러온다.
-    const rid = getResumeId();
-    if (rid) {
-      resume
-        .get(rid)
-        .then((r) => {
-          setResumeData(r);
-          setRawText(r.rawText);
-          setRegistered(true);
-          if (hasValidSummary(r.summary)) {
-            setSummaryReady(true);
-          } else {
-            // 요약이 비었거나 깨진(과거 XML 누출) 경우 재분석을 한 번 트리거한 뒤 폴링
-            resume.reanalyze(rid).catch(() => {});
-            pollSummary(rid);
-          }
-        })
-        .catch(() => {});
-    }
-
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
-  }, []);
+  };
 
   // 백그라운드 AI 요약 폴링 (최대 ~80초, 그 뒤엔 타임아웃 처리해 무한 스피너 방지)
   const pollSummary = (id: string) => {
@@ -254,6 +257,7 @@ export default function ResumePage() {
       setResumeId(created.id);
       setResumeData(created);
       setRegistered(true); // rawText 저장·세션 연결 완료 → 면접 시작 가능
+      if (sessionId) loadExpectedQuestions(sessionId); // 등록 후에야 맞춤 질문 생성
       if (hasValidSummary(created.summary)) setSummaryReady(true);
       else pollSummary(created.id);
     } catch (err) {
@@ -596,7 +600,18 @@ export default function ResumePage() {
           </Stack>
         )}
 
-        {(questionsLoading || questions.length > 0) && (
+        {!registered && !questionsLoading && questions.length === 0 ? (
+          <Stack gap={0}>
+            <Text fz="md" fw={700} mb="xs">
+              맞춤 예상 질문
+            </Text>
+            <Divider />
+            <Text fz="sm" c="dimmed" py="md" lh={1.6}>
+              이력서를 등록하면 이력서 내용과 회사 분석을 바탕으로 맞춤 예상
+              질문을 만들어 드립니다.
+            </Text>
+          </Stack>
+        ) : (
           <Stack gap={0}>
             <Group justify="space-between" align="end" mb="xs">
               <Text fz="md" fw={700}>

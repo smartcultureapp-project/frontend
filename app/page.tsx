@@ -10,7 +10,7 @@ import {
   Box,
   Divider,
 } from "@mantine/core";
-import { IconArrowRight, IconArrowUpRight } from "@tabler/icons-react";
+import { IconArrowRight } from "@tabler/icons-react";
 import { PageContainer } from "./components/PageContainer";
 import classes from "./page.module.css";
 
@@ -103,7 +103,7 @@ export default function HomePage() {
           <Divider />
           {steps.map((step) => (
             <Box key={step.num}>
-              <Link href={step.href} className={classes.stepRow}>
+              <div className={classes.stepRow}>
                 <Group align="flex-start" wrap="nowrap" gap="xl">
                   <Text
                     fz={14}
@@ -132,12 +132,9 @@ export default function HomePage() {
                     <Text fz="xs" c="dimmed">
                       {step.duration}
                     </Text>
-                    <span className={classes.chevron}>
-                      <IconArrowUpRight size={16} />
-                    </span>
                   </Group>
                 </Group>
-              </Link>
+              </div>
               <Divider />
             </Box>
           ))}

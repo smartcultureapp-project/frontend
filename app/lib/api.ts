@@ -44,6 +44,29 @@ export function clearAuth() {
   window.localStorage.removeItem(GUEST_KEY);
 }
 
+// 게스트 계정 여부 (자동발급 게스트는 @preq.local 이메일)
+export function isGuestEmail(email: string | null | undefined): boolean {
+  return !!email && email.endsWith("@preq.local");
+}
+
+// 실제 로그인 — 게스트 폴백을 끊고 사용자 토큰으로 전환
+export async function loginUser(email: string, password: string) {
+  const { accessToken } = await auth.login({ email, password });
+  window.localStorage.removeItem(GUEST_KEY);
+  setToken(accessToken);
+}
+
+export async function signupUser(email: string, password: string, name: string) {
+  const { accessToken } = await auth.register({ email, password, name });
+  window.localStorage.removeItem(GUEST_KEY);
+  setToken(accessToken);
+}
+
+// 로그아웃 — 다음 보호 요청 시 ensureAuth 가 새 게스트를 발급
+export function logout() {
+  clearAuth();
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
