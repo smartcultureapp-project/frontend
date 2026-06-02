@@ -12,7 +12,10 @@ import {
   Divider,
   Alert,
   Loader,
+  Table,
+  Paper,
 } from "@mantine/core";
+import { RadarChart, BarChart } from "@mantine/charts";
 import {
   IconCheck,
   IconX,
@@ -76,6 +79,34 @@ export default function ReportPage() {
   const weaknesses = turns
     .map((t) => t.feedbackImprove)
     .filter((x): x is string => !!x);
+
+  // 역량 5축 (백엔드 CategoryScoresSchema 와 동일 순서)
+  const CATEGORIES = [
+    { key: "jobUnderstanding", label: "직무이해" },
+    { key: "technicalSkill", label: "기술역량" },
+    { key: "communication", label: "의사소통" },
+    { key: "problemSolving", label: "문제해결" },
+    { key: "companyFit", label: "회사적합성" },
+  ] as const;
+
+  const withCats = turns.filter((t) => t.categoryScores != null);
+
+  // 역량별 전체 평균 (레이더 차트용)
+  const radarData = CATEGORIES.map(({ key, label }) => {
+    const vals = withCats
+      .map((t) => t.categoryScores?.[key])
+      .filter((v): v is number => typeof v === "number");
+    const mean = vals.length
+      ? vals.reduce((s, v) => s + v, 0) / vals.length
+      : 0;
+    return { category: label, 점수: Math.round(mean * 10) / 10 };
+  });
+
+  // 문항별 종합 점수 (막대 그래프용)
+  const barData = scored.map((t, i) => ({
+    q: `Q${String(i + 1).padStart(2, "0")}`,
+    점수: t.score ?? 0,
+  }));
 
   if (loading) {
     return (
@@ -160,23 +191,91 @@ export default function ReportPage() {
                 <Text fz="xs" c="dimmed" fw={600} style={{ letterSpacing: 0.8 }}>
                   문항별 점수
                 </Text>
-                <Stack gap="sm">
-                  {scored.map((t, i) => (
-                    <Group key={t.id} justify="space-between">
-                      <Text fz="sm" c="dark.7" truncate style={{ maxWidth: 240 }}>
-                        Q{String(i + 1).padStart(2, "0")}. {t.question}
-                      </Text>
-                      <Text fz="sm" ff="monospace" c="brand.6" fw={700}>
-                        {t.score}
-                        <Text component="span" c="dimmed" inherit>
-                          /5
-                        </Text>
-                      </Text>
-                    </Group>
-                  ))}
-                </Stack>
+                {barData.length > 0 ? (
+                  <BarChart
+                    h={200}
+                    data={barData}
+                    dataKey="q"
+                    series={[{ name: "점수", color: "brand.5" }]}
+                    yAxisProps={{ domain: [0, 5], ticks: [0, 1, 2, 3, 4, 5] }}
+                    barProps={{ radius: 4 }}
+                    gridAxis="y"
+                  />
+                ) : (
+                  <Text fz="sm" c="dimmed">
+                    채점된 문항이 없습니다.
+                  </Text>
+                )}
               </Stack>
             </SimpleGrid>
+
+            {withCats.length > 0 && (
+              <SimpleGrid cols={{ base: 1, md: 2 }} spacing={48}>
+                <Stack gap="md">
+                  <Text
+                    fz="xs"
+                    c="dimmed"
+                    fw={600}
+                    style={{ letterSpacing: 0.8 }}
+                  >
+                    역량 분석
+                  </Text>
+                  <Center>
+                    <RadarChart
+                      h={260}
+                      w="100%"
+                      data={radarData}
+                      dataKey="category"
+                      series={[
+                        { name: "점수", color: "brand.5", opacity: 0.25 },
+                      ]}
+                      withPolarRadiusAxis
+                      polarRadiusAxisProps={{ domain: [0, 5], angle: 90 }}
+                    />
+                  </Center>
+                </Stack>
+
+                <Stack gap="md">
+                  <Text
+                    fz="xs"
+                    c="dimmed"
+                    fw={600}
+                    style={{ letterSpacing: 0.8 }}
+                  >
+                    역량별 평균 점수
+                  </Text>
+                  <Paper withBorder radius="md" p={0}>
+                    <Table verticalSpacing="sm" horizontalSpacing="md">
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>역량</Table.Th>
+                          <Table.Th ta="right">평균</Table.Th>
+                          <Table.Th ta="right">5점 만점</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {radarData.map((r) => (
+                          <Table.Tr key={r.category}>
+                            <Table.Td fw={600}>{r.category}</Table.Td>
+                            <Table.Td
+                              ta="right"
+                              ff="monospace"
+                              c="brand.6"
+                              fw={700}
+                            >
+                              {r.점수.toFixed(1)}
+                            </Table.Td>
+                            <Table.Td ta="right" c="dimmed" ff="monospace">
+                              / 5
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </Paper>
+                </Stack>
+              </SimpleGrid>
+            )}
 
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing={48}>
               <Stack gap="md">

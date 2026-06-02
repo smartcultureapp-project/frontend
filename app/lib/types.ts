@@ -81,12 +81,22 @@ export type ResumeAnalysis = {
   updatedAt: string;
 };
 
+// 답변별 역량 점수 (백엔드 CategoryScoresSchema 와 동일, 각 1~5)
+export type CategoryScores = {
+  jobUnderstanding: number;
+  technicalSkill: number;
+  communication: number;
+  problemSolving: number;
+  companyFit: number;
+};
+
 export type InterviewTurn = {
   id: string;
   sessionId: string;
   question: string | null;
   answer: string | null;
   score: number | null;
+  categoryScores: CategoryScores | null;
   feedbackGood: string | null;
   feedbackImprove: string | null;
   betterAnswer: string | null;
@@ -103,6 +113,7 @@ export type NextQuestion = {
 export type AnswerFeedback = {
   turnId: string;
   score: number | null;
+  categoryScores: CategoryScores | null;
   feedbackGood: string | null;
   feedbackImprove: string | null;
   betterAnswer: string | null;

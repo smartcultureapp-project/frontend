@@ -3,6 +3,7 @@ import { MantineProvider, ColorSchemeScript, Box } from "@mantine/core";
 import { TopNav } from "./components/TopNav";
 import { theme } from "./theme";
 import "@mantine/core/styles.css";
+import "@mantine/charts/styles.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
