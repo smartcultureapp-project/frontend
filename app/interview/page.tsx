@@ -102,6 +102,8 @@ export default function InterviewPage() {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const wordsRef = useRef<{ word: string; start: number; end: number }[]>([]);
+  // 피드백을 읽는 동안 다음 질문을 미리 생성해 두는 캐시
+  const prefetchRef = useRef<Promise<NextQuestion> | null>(null);
 
   const [transcribing, setTranscribing] = useState(false);
   const [sttMetrics, setSttMetrics] = useState<SpeechMetrics | null>(null);
@@ -344,10 +346,14 @@ export default function InterviewPage() {
     setLoadingQ(true);
     setError(null);
     try {
-      const q = await sessions.nextQuestion(sid);
+      // 미리 생성해 둔 질문이 있으면 그걸 쓰고(즉시), 없으면 새로 요청
+      const pending = prefetchRef.current;
+      prefetchRef.current = null;
+      const q = pending ? await pending : await sessions.nextQuestion(sid);
       setCurrent(q);
       setAnswer("");
       setFeedback(null);
+      setSttMetrics(null);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "질문을 가져오지 못했습니다.",
@@ -370,6 +376,12 @@ export default function InterviewPage() {
       );
       setFeedback(fb);
       setAnsweredCount((c) => c + 1);
+      // 사용자가 피드백을 읽는 동안 다음 질문을 미리 생성(체감 지연 제거)
+      const p = sessions.nextQuestion(sessionId);
+      p.catch(() => {
+        if (prefetchRef.current === p) prefetchRef.current = null;
+      });
+      prefetchRef.current = p;
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "답변 제출에 실패했습니다.",
