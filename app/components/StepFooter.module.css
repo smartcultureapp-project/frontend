@@ -1,0 +1,22 @@
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  margin-top: 48px;
+  /* Cancel PageContainer's bottom padding (py=48) so the bar sits flush at
+     the very bottom — otherwise it jumps up ~48px at the end of the scroll. */
+  margin-bottom: -48px;
+  padding: 16px 0 20px;
+  background: #fff;
+}
+
+.footer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100vw;
+  height: 1px;
+  background: var(--mantine-color-gray-2);
+}

@@ -50,6 +50,34 @@ function interviewerName(id: string | null | undefined): string {
 
 const TOTAL_QUESTIONS = 10;
 
+// 한국어 추임새/필러 (백엔드 STT 서비스와 동일)
+const KOREAN_FILLERS = new Set([
+  "음", "어", "그", "저기", "뭐", "그니까", "그러니까", "이제", "인제", "약간", "막",
+]);
+
+type DgWord = { word: string; start: number; end: number };
+
+function computeSpeechMetrics(
+  words: DgWord[],
+  fallbackSec: number,
+): SpeechMetrics {
+  const wordCount = words.length;
+  const durationSec =
+    wordCount > 0
+      ? Math.round((words[wordCount - 1].end - words[0].start) * 10) / 10
+      : Math.round(fallbackSec * 10) / 10;
+  const wordsPerMin =
+    durationSec > 0 ? Math.round((wordCount / durationSec) * 60) : 0;
+  let fillerCount = 0;
+  let pauseCount = 0;
+  for (let i = 0; i < words.length; i++) {
+    const raw = (words[i].word ?? "").replace(/[.,!?]/g, "").trim();
+    if (KOREAN_FILLERS.has(raw)) fillerCount++;
+    if (i > 0 && words[i].start - words[i - 1].end > 0.7) pauseCount++;
+  }
+  return { transcript: "", durationSec, wordCount, wordsPerMin, fillerCount, pauseCount };
+}
+
 export default function InterviewPage() {
   const router = useRouter();
 
@@ -72,9 +100,12 @@ export default function InterviewPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const wordsRef = useRef<{ word: string; start: number; end: number }[]>([]);
 
   const [transcribing, setTranscribing] = useState(false);
   const [sttMetrics, setSttMetrics] = useState<SpeechMetrics | null>(null);
+  const [interim, setInterim] = useState("");
 
   // 실제 자세 감지 (MediaPipe) — 카메라가 켜지고 준비됐을 때만
   const posture = usePosture(videoRef, cameraOn && camReady && !camError);
@@ -171,12 +202,12 @@ export default function InterviewPage() {
     };
   }, [cameraOn]);
 
-  // 음성 인식 (지원 시) — 인식 결과를 답변 텍스트에 이어붙임
-  // 답변 녹음 → 멈추면 Deepgram STT 로 전사 + 발화 지표(속도/필러/멈칫) 산출
+  // 마이크 토글: 실시간 스트리밍(토큰 발급되면) ↔ 배치(폴백)
+  const recStartRef = useRef(0);
+
   const toggleRecording = async () => {
     if (recording) {
-      mediaRecorderRef.current?.stop(); // onstop 에서 전사 진행
-      setRecording(false);
+      stopRecording();
       return;
     }
 
@@ -185,45 +216,127 @@ export default function InterviewPage() {
       return;
     }
 
+    // 실시간용 단기 토큰 시도 (권한 없으면 null → 배치 폴백)
+    let token: string | null = null;
+    try {
+      token = (await stt.token()).accessToken;
+    } catch {
+      token = null;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStreamRef.current = stream;
       audioChunksRef.current = [];
+      wordsRef.current = [];
+      setSttMetrics(null);
+      setInterim("");
+      recStartRef.current = Date.now();
+
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      recorder.onstop = async () => {
-        audioStreamRef.current?.getTracks().forEach((t) => t.stop());
-        audioStreamRef.current = null;
-        const blob = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || "audio/webm",
-        });
-        if (blob.size === 0) return;
-        setTranscribing(true);
-        try {
-          const m = await stt.transcribe(blob);
-          setSttMetrics(m);
-          if (m.transcript) {
-            setAnswer((prev) =>
-              prev ? `${prev} ${m.transcript}`.trim() : m.transcript,
-            );
-          }
-        } catch (err) {
-          setError(
-            err instanceof ApiError ? err.message : "음성 인식에 실패했습니다.",
-          );
-        } finally {
-          setTranscribing(false);
-        }
-      };
+      if (token) {
+        // ── 실시간 스트리밍 (Deepgram WebSocket 직결) ──
+        // 단기 토큰(JWT)은 'bearer' 서브프로토콜로 인증 (API 키는 'token')
+        const ws = new WebSocket(
+          "wss://api.deepgram.com/v1/listen?model=nova-2&language=ko&interim_results=true&punctuate=true",
+          ["bearer", token],
+        );
+        wsRef.current = ws;
 
-      recorder.start();
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data as string);
+            const alt = data?.channel?.alternatives?.[0];
+            const text: string = alt?.transcript ?? "";
+            if (!text) return;
+            if (data.is_final) {
+              setAnswer((prev) => (prev ? `${prev} ${text}`.trim() : text));
+              setInterim("");
+              if (Array.isArray(alt.words)) {
+                wordsRef.current.push(...alt.words);
+                // 실시간 갱신: final 세그먼트가 올 때마다 발화 지표 재계산
+                const elapsed = (Date.now() - recStartRef.current) / 1000;
+                setSttMetrics(computeSpeechMetrics(wordsRef.current, elapsed));
+              }
+            } else {
+              setInterim(text);
+            }
+          } catch {
+            /* 무시 */
+          }
+        };
+
+        ws.onopen = () => {
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+              ws.send(e.data);
+            }
+          };
+          recorder.start(250); // 250ms 청크로 실시간 전송
+        };
+      } else {
+        // ── 배치 폴백 (녹음 → 멈추면 전사) ──
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+        recorder.onstop = async () => {
+          const blob = new Blob(audioChunksRef.current, {
+            type: recorder.mimeType || "audio/webm",
+          });
+          if (blob.size === 0) return;
+          setTranscribing(true);
+          try {
+            const m = await stt.transcribe(blob);
+            setSttMetrics(m);
+            if (m.transcript) {
+              setAnswer((prev) =>
+                prev ? `${prev} ${m.transcript}`.trim() : m.transcript,
+              );
+            }
+          } catch (err) {
+            setError(
+              err instanceof ApiError ? err.message : "음성 인식에 실패했습니다.",
+            );
+          } finally {
+            setTranscribing(false);
+          }
+        };
+        recorder.start();
+      }
+
       setRecording(true);
     } catch {
       setError("마이크 권한이 필요합니다.");
+    }
+  };
+
+  const stopRecording = () => {
+    setRecording(false);
+    setInterim("");
+    const recorder = mediaRecorderRef.current;
+    const ws = wsRef.current;
+
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    audioStreamRef.current?.getTracks().forEach((t) => t.stop());
+    audioStreamRef.current = null;
+
+    if (ws) {
+      // 스트리밍 종료 신호 후 닫기 + 누적 단어로 발화 지표 계산
+      try {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "CloseStream" }));
+        }
+      } catch {
+        /* 무시 */
+      }
+      setTimeout(() => ws.close(), 400);
+      wsRef.current = null;
+      const elapsed = (Date.now() - recStartRef.current) / 1000;
+      if (wordsRef.current.length > 0) {
+        setSttMetrics(computeSpeechMetrics(wordsRef.current, elapsed));
+      }
     }
   };
 
@@ -246,10 +359,7 @@ export default function InterviewPage() {
 
   const submitAnswer = async () => {
     if (!sessionId || !answer.trim()) return;
-    if (recording) {
-      mediaRecorderRef.current?.stop();
-      setRecording(false);
-    }
+    if (recording) stopRecording();
     setSubmitting(true);
     setError(null);
     try {
@@ -638,19 +748,26 @@ export default function InterviewPage() {
               />
 
               {recording && (
-                <Group gap={8} c="red">
-                  <Box
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 8,
-                      background: "var(--mantine-color-red-6)",
-                    }}
-                  />
-                  <Text fz="xs" fw={600}>
-                    녹음 중… 다시 누르면 음성을 텍스트로 변환합니다
-                  </Text>
-                </Group>
+                <Stack gap={6}>
+                  <Group gap={8} c="red">
+                    <Box
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 8,
+                        background: "var(--mantine-color-red-6)",
+                      }}
+                    />
+                    <Text fz="xs" fw={600}>
+                      녹음 중… 마이크를 다시 누르면 종료됩니다
+                    </Text>
+                  </Group>
+                  {interim && (
+                    <Text fz="sm" c="dimmed" fs="italic" lh={1.5}>
+                      {interim}
+                    </Text>
+                  )}
+                </Stack>
               )}
               {transcribing && (
                 <Group gap={8}>
@@ -660,8 +777,13 @@ export default function InterviewPage() {
                   </Text>
                 </Group>
               )}
-              {sttMetrics && !recording && !transcribing && (
+              {sttMetrics && !transcribing && (
                 <Group gap="md" wrap="wrap">
+                  {recording && (
+                    <Text fz="xs" fw={700} c="red">
+                      실시간
+                    </Text>
+                  )}
                   <Text fz="xs" c="dimmed">
                     말 속도{" "}
                     <Text component="span" fw={700} c="dark.7" inherit>

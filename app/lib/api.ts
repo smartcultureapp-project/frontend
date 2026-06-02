@@ -311,6 +311,10 @@ export const sessions = {
 // ---------------------------------------------------------------------------
 
 export const stt = {
+  // 실시간 스트리밍용 Deepgram 단기 토큰
+  token: () =>
+    request<{ accessToken: string; expiresIn: number }>("/stt/token"),
+
   transcribe: async (audio: Blob): Promise<SpeechMetrics> => {
     const token = getToken();
     const form = new FormData();

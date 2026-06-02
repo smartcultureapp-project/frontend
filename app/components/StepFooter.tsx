@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Button, Group, Divider, Stack } from "@mantine/core";
+import { Button, Group } from "@mantine/core";
 import { IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
+import classes from "./StepFooter.module.css";
 
 type Props = {
   prevHref?: string;
@@ -22,8 +23,7 @@ export function StepFooter({
   onNextClick,
 }: Props) {
   return (
-    <Stack gap={32} mt={48}>
-      <Divider />
+    <div className={classes.footer}>
       <Group justify="space-between">
         {prevHref ? (
           <Button
@@ -50,6 +50,6 @@ export function StepFooter({
           </Button>
         ) : null}
       </Group>
-    </Stack>
+    </div>
   );
 }
