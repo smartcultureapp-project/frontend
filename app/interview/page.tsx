@@ -14,6 +14,7 @@ import {
   Tooltip,
   Alert,
   Loader,
+  Switch,
 } from "@mantine/core";
 import {
   IconMicrophone,
@@ -24,6 +25,7 @@ import {
   IconArrowRight,
   IconAlertCircle,
   IconSend,
+  IconBulb,
 } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -78,6 +80,79 @@ function computeSpeechMetrics(
   return { transcript: "", durationSec, wordCount, wordsPerMin, fillerCount, pauseCount };
 }
 
+type LiveHint = { id: string; tone: "warn" | "good"; text: string };
+
+// 발화 지표(말투) + 답변 길이(말 내용)로 실시간 코칭 힌트를 만든다.
+// LLM 없이 클라이언트에서 즉시 계산 → 녹음 중에도 지연 없이 갱신된다.
+function buildLiveHints(
+  m: SpeechMetrics | null,
+  answerLen: number,
+  recording: boolean,
+): LiveHint[] {
+  const hints: LiveHint[] = [];
+
+  if (m) {
+    // 말 속도(말투)
+    if (m.wordsPerMin > 0 && m.wordsPerMin > 400) {
+      hints.push({
+        id: "fast",
+        tone: "warn",
+        text: "말이 빨라지고 있어요. 한 박자 천천히, 또박또박 말해보세요.",
+      });
+    } else if (m.wordCount >= 15 && m.wordsPerMin > 0 && m.wordsPerMin < 130) {
+      hints.push({
+        id: "slow",
+        tone: "warn",
+        text: "말 속도가 느려요. 조금 더 또렷하고 적극적으로 설명해보세요.",
+      });
+    }
+
+    // 추임새(말투)
+    if (m.fillerCount > 6) {
+      hints.push({
+        id: "filler",
+        tone: "warn",
+        text: `'음·어' 같은 추임새가 ${m.fillerCount}회예요. 말하기 전에 잠깐 멈춰 문장을 정리하세요.`,
+      });
+    } else if (m.fillerCount > 3) {
+      hints.push({
+        id: "filler",
+        tone: "warn",
+        text: "추임새가 늘고 있어요. 공백을 추임새 대신 짧은 침묵으로 두세요.",
+      });
+    }
+
+    // 멈칫(말투)
+    if (m.pauseCount > 3) {
+      hints.push({
+        id: "pause",
+        tone: "warn",
+        text: "멈칫이 잦아요. 결론부터 말하는 두괄식으로 흐름을 잡아보세요.",
+      });
+    }
+  }
+
+  // 답변 길이(말 내용)
+  if (recording && answerLen > 600) {
+    hints.push({
+      id: "long",
+      tone: "warn",
+      text: "답변이 길어지고 있어요. 핵심 한두 가지로 압축해 마무리하세요.",
+    });
+  }
+
+  // 지적할 게 없으면 긍정 신호로 페이스 유지를 유도
+  if (!hints.length && m && m.wordCount >= 12) {
+    hints.push({
+      id: "good",
+      tone: "good",
+      text: "발화 흐름이 안정적이에요. 지금 페이스를 유지하세요. 👍",
+    });
+  }
+
+  return hints;
+}
+
 export default function InterviewPage() {
   const router = useRouter();
 
@@ -108,6 +183,24 @@ export default function InterviewPage() {
   const [transcribing, setTranscribing] = useState(false);
   const [sttMetrics, setSttMetrics] = useState<SpeechMetrics | null>(null);
   const [interim, setInterim] = useState("");
+
+  // 실시간 힌트 on/off (기본 on, 사용자 선택을 로컬에 저장)
+  const [hintsOn, setHintsOn] = useState(true);
+  useEffect(() => {
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("preq.liveHints")
+        : null;
+    if (saved !== null) setHintsOn(saved === "1");
+  }, []);
+  const toggleHints = (on: boolean) => {
+    setHintsOn(on);
+    try {
+      window.localStorage.setItem("preq.liveHints", on ? "1" : "0");
+    } catch {
+      /* 무시 */
+    }
+  };
 
   // 실제 자세 감지 (MediaPipe) — 카메라가 켜지고 준비됐을 때만
   const posture = usePosture(videoRef, cameraOn && camReady && !camError);
@@ -401,6 +494,12 @@ export default function InterviewPage() {
   const number = Math.min(answeredCount + 1, TOTAL_QUESTIONS);
   const progress = (number / TOTAL_QUESTIONS) * 100;
   const reachedLimit = answeredCount >= TOTAL_QUESTIONS;
+
+  // 실시간 힌트: 토글이 켜져 있고 답변/녹음이 진행 중일 때만 노출
+  const liveHints =
+    hintsOn && !feedback && (recording || answer.trim().length > 0)
+      ? buildLiveHints(sttMetrics, answer.length, recording)
+      : [];
 
   return (
     <Box className={classes.shell}>
@@ -738,14 +837,35 @@ export default function InterviewPage() {
                 >
                   내 답변
                 </Text>
-                {recording && (
-                  <Group gap={5} align="center">
-                    <Box className={classes.recIndicator} />
-                    <Text fz={11} c="red.7" fw={600}>
-                      음성 인식 중
-                    </Text>
-                  </Group>
-                )}
+                <Group gap={12} align="center">
+                  {recording && (
+                    <Group gap={5} align="center">
+                      <Box className={classes.recIndicator} />
+                      <Text fz={11} c="red.7" fw={600}>
+                        음성 인식 중
+                      </Text>
+                    </Group>
+                  )}
+                  <Tooltip
+                    label={hintsOn ? "실시간 힌트 끄기" : "실시간 힌트 켜기"}
+                    withArrow
+                  >
+                    <Switch
+                      size="xs"
+                      checked={hintsOn}
+                      onChange={(e) => toggleHints(e.currentTarget.checked)}
+                      label={
+                        <Group gap={4} align="center" wrap="nowrap">
+                          <IconBulb size={13} />
+                          <Text fz={11} fw={600} c="dimmed">
+                            실시간 힌트
+                          </Text>
+                        </Group>
+                      }
+                      labelPosition="left"
+                    />
+                  </Tooltip>
+                </Group>
               </Group>
               <Textarea
                 value={answer}
@@ -825,6 +945,45 @@ export default function InterviewPage() {
                     </Text>
                   </Text>
                 </Group>
+              )}
+              {liveHints.length > 0 && (
+                <Stack gap={6} mt="sm">
+                  {liveHints.map((h) => (
+                    <Group
+                      key={h.id}
+                      gap={8}
+                      align="flex-start"
+                      wrap="nowrap"
+                      p="6px 10px"
+                      style={{
+                        borderRadius: 8,
+                        background:
+                          h.tone === "warn"
+                            ? "var(--mantine-color-orange-0)"
+                            : "var(--mantine-color-teal-0)",
+                      }}
+                    >
+                      <IconBulb
+                        size={14}
+                        style={{
+                          marginTop: 2,
+                          flexShrink: 0,
+                          color:
+                            h.tone === "warn"
+                              ? "var(--mantine-color-orange-7)"
+                              : "var(--mantine-color-teal-7)",
+                        }}
+                      />
+                      <Text
+                        fz="xs"
+                        lh={1.4}
+                        c={h.tone === "warn" ? "orange.9" : "teal.9"}
+                      >
+                        {h.text}
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
               )}
               <Group
                 justify="space-between"
