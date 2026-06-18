@@ -26,6 +26,7 @@ import {
   IconAlertCircle,
   IconSend,
   IconBulb,
+  IconSparkles,
 } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -50,7 +51,8 @@ function interviewerName(id: string | null | undefined): string {
   return interviewers.find((p) => p.id === id)?.name ?? "면접관";
 }
 
-const TOTAL_QUESTIONS = 10;
+// 꼬리물기 면접이라 고정 개수가 아닌 "최대" 개수. 패널이 충분히 검증하면 이 전에 조기 종료.
+const MAX_QUESTIONS = 13;
 
 // 한국어 추임새/필러 (백엔드 STT 서비스와 동일)
 const KOREAN_FILLERS = new Set([
@@ -202,6 +204,76 @@ export default function InterviewPage() {
     }
   };
 
+  // 면접관 내부 논의 on/off (기본 off — 켜면 보임, 선택을 로컬에 저장)
+  const [showDiscussion, setShowDiscussion] = useState(false);
+  useEffect(() => {
+    const saved =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("preq.showDiscussion")
+        : null;
+    if (saved !== null) setShowDiscussion(saved === "1");
+  }, []);
+  const toggleDiscussion = (on: boolean) => {
+    setShowDiscussion(on);
+    try {
+      window.localStorage.setItem("preq.showDiscussion", on ? "1" : "0");
+    } catch {
+      /* 무시 */
+    }
+  };
+
+  // 패널이 조기 종료를 권고했는지(다음 질문 대신 면접 마무리)
+  const [panelConcluded, setPanelConcluded] = useState(false);
+
+  // AI 실시간 코칭(무음 시점 Haiku 힌트)
+  const [aiHint, setAiHint] = useState("");
+  // 콜백/타이머 안에서 최신 값을 읽기 위한 ref 동기화
+  const answerRef = useRef("");
+  const hintsOnRef = useRef(true);
+  const recordingRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastHintLenRef = useRef(0);
+  const hintInFlightRef = useRef(false);
+  useEffect(() => {
+    answerRef.current = answer;
+  }, [answer]);
+  useEffect(() => {
+    hintsOnRef.current = hintsOn;
+  }, [hintsOn]);
+  useEffect(() => {
+    recordingRef.current = recording;
+  }, [recording]);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  // 무음 1.1초 후, 지금까지의 발화로 코칭 힌트 요청(녹음·힌트 ON일 때만)
+  const requestAiHint = async () => {
+    const sid = sessionIdRef.current;
+    const text = answerRef.current.trim();
+    if (!sid || !hintsOnRef.current || !recordingRef.current) return;
+    if (text.length < 15 || text.length <= lastHintLenRef.current + 10) return;
+    if (hintInFlightRef.current) return;
+    hintInFlightRef.current = true;
+    lastHintLenRef.current = text.length;
+    try {
+      const { hint } = await sessions.liveHint(sid, text);
+      if (hint && recordingRef.current && hintsOnRef.current) setAiHint(hint);
+    } catch {
+      /* 무시 */
+    } finally {
+      hintInFlightRef.current = false;
+    }
+  };
+  // 발화가 있을 때마다 타이머를 리셋 → 잠깐 멈추면(무음) 1회 발화
+  const bumpSilenceTimer = () => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => {
+      void requestAiHint();
+    }, 1100);
+  };
+
   // 실제 자세 감지 (MediaPipe) — 카메라가 켜지고 준비됐을 때만
   const posture = usePosture(videoRef, cameraOn && camReady && !camError);
 
@@ -326,6 +398,8 @@ export default function InterviewPage() {
       wordsRef.current = [];
       setSttMetrics(null);
       setInterim("");
+      setAiHint("");
+      lastHintLenRef.current = 0;
       recStartRef.current = Date.now();
 
       const recorder = new MediaRecorder(stream);
@@ -358,6 +432,8 @@ export default function InterviewPage() {
             } else {
               setInterim(text);
             }
+            // 발화 감지 → 무음 타이머 리셋(잠깐 멈추면 코칭 힌트 요청)
+            bumpSilenceTimer();
           } catch {
             /* 무시 */
           }
@@ -410,6 +486,10 @@ export default function InterviewPage() {
   const stopRecording = () => {
     setRecording(false);
     setInterim("");
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     const recorder = mediaRecorderRef.current;
     const ws = wsRef.current;
 
@@ -443,10 +523,18 @@ export default function InterviewPage() {
       const pending = prefetchRef.current;
       prefetchRef.current = null;
       const q = pending ? await pending : await sessions.nextQuestion(sid);
+      // 패널 종료 권고/상한 도달 → 질문 없이 면접 종료, 리포트로 이동
+      if (q?.done) {
+        setPanelConcluded(true);
+        await endInterview();
+        return;
+      }
       setCurrent(q);
       setAnswer("");
       setFeedback(null);
       setSttMetrics(null);
+      setAiHint("");
+      lastHintLenRef.current = 0;
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "질문을 가져오지 못했습니다.",
@@ -471,9 +559,15 @@ export default function InterviewPage() {
       setAnsweredCount((c) => c + 1);
       // 사용자가 피드백을 읽는 동안 다음 질문을 미리 생성(체감 지연 제거)
       const p = sessions.nextQuestion(sessionId);
-      p.catch(() => {
-        if (prefetchRef.current === p) prefetchRef.current = null;
-      });
+      p.then(
+        (q) => {
+          // 패널이 조기 종료를 권고하면 버튼을 "리포트 보기"로 전환
+          if (q?.done) setPanelConcluded(true);
+        },
+        () => {
+          if (prefetchRef.current === p) prefetchRef.current = null;
+        },
+      );
       prefetchRef.current = p;
     } catch (err) {
       setError(
@@ -491,9 +585,10 @@ export default function InterviewPage() {
     router.push("/report");
   };
 
-  const number = Math.min(answeredCount + 1, TOTAL_QUESTIONS);
-  const progress = (number / TOTAL_QUESTIONS) * 100;
-  const reachedLimit = answeredCount >= TOTAL_QUESTIONS;
+  const number = Math.min(answeredCount + 1, MAX_QUESTIONS);
+  const progress = (number / MAX_QUESTIONS) * 100;
+  // 하드 상한 도달 또는 패널 조기 종료 권고 → 면접 종료
+  const interviewOver = answeredCount >= MAX_QUESTIONS || panelConcluded;
 
   // 실시간 힌트: 토글이 켜져 있고 답변/녹음이 진행 중일 때만 노출
   const liveHints =
@@ -509,7 +604,7 @@ export default function InterviewPage() {
             면접 진행 중
           </Text>
           <Text fz="sm" c="dimmed" ff="monospace">
-            {String(number).padStart(2, "0")} / {TOTAL_QUESTIONS}
+            {String(number).padStart(2, "0")} / 최대 {MAX_QUESTIONS}
           </Text>
         </Group>
         <Group gap="xs">
@@ -689,21 +784,43 @@ export default function InterviewPage() {
           )}
 
           <Box className={classes.questionSection} key={current?.turnId}>
-            <Group gap={8} align="center">
-              <Text
-                fz={11}
-                c="brand.6"
-                fw={700}
-                ff="monospace"
-                style={{ letterSpacing: 1 }}
-              >
-                Q{String(number).padStart(2, "0")}
-              </Text>
-              {!loadingQ && current?.interviewerId && (
-                <Text fz={11} c="dimmed" fw={600}>
-                  · {interviewerName(current.interviewerId)} 질문
+            <Group gap={8} align="center" justify="space-between" wrap="nowrap">
+              <Group gap={8} align="center" wrap="nowrap">
+                <Text
+                  fz={11}
+                  c="brand.6"
+                  fw={700}
+                  ff="monospace"
+                  style={{ letterSpacing: 1 }}
+                >
+                  Q{String(number).padStart(2, "0")}
                 </Text>
-              )}
+                {!loadingQ && current?.interviewerId && (
+                  <Text fz={11} c="dimmed" fw={600}>
+                    · {interviewerName(current.interviewerId)} 질문
+                  </Text>
+                )}
+              </Group>
+              {!loadingQ &&
+                current?.discussion &&
+                current.discussion.length > 0 && (
+                  <Tooltip
+                    label={showDiscussion ? "면접관 논의 숨기기" : "면접관 논의 보기"}
+                    withArrow
+                  >
+                    <Switch
+                      size="xs"
+                      checked={showDiscussion}
+                      onChange={(e) => toggleDiscussion(e.currentTarget.checked)}
+                      label={
+                        <Text fz={11} fw={600} c="dimmed">
+                          면접관 논의
+                        </Text>
+                      }
+                      labelPosition="left"
+                    />
+                  </Tooltip>
+                )}
             </Group>
             {loadingQ ? (
               <Group gap={8} mt={10}>
@@ -719,6 +836,7 @@ export default function InterviewPage() {
             )}
 
             {!loadingQ &&
+              showDiscussion &&
               current?.discussion &&
               current.discussion.length > 0 && (
                 <Box
@@ -810,9 +928,9 @@ export default function InterviewPage() {
                 </Stack>
               </ScrollArea>
               <Group justify="flex-end" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-gray-2)" }}>
-                {reachedLimit ? (
+                {interviewOver ? (
                   <Button color="brand" onClick={endInterview}>
-                    리포트 보기 →
+                    면접 종료 · 리포트 보기 →
                   </Button>
                 ) : (
                   <Button
@@ -944,6 +1062,37 @@ export default function InterviewPage() {
                       {sttMetrics.pauseCount}회
                     </Text>
                   </Text>
+                </Group>
+              )}
+              {hintsOn && aiHint && !feedback && (
+                <Group
+                  gap={8}
+                  align="flex-start"
+                  wrap="nowrap"
+                  mt="sm"
+                  p="8px 11px"
+                  style={{
+                    borderRadius: 8,
+                    background: "var(--mantine-color-brand-0)",
+                    border: "1px solid var(--mantine-color-brand-2)",
+                  }}
+                >
+                  <IconSparkles
+                    size={15}
+                    style={{
+                      marginTop: 1,
+                      flexShrink: 0,
+                      color: "var(--mantine-color-brand-7)",
+                    }}
+                  />
+                  <Box>
+                    <Text fz={10} fw={700} c="brand.7" style={{ letterSpacing: 0.3 }}>
+                      AI 코치
+                    </Text>
+                    <Text fz="xs" lh={1.45} c="brand.9" mt={1}>
+                      {aiHint}
+                    </Text>
+                  </Box>
                 </Group>
               )}
               {liveHints.length > 0 && (

@@ -133,6 +133,9 @@ export type NextQuestion = {
   questionType: string | null;
   discussion: DiscussionTurn[] | null;
   turnIndex: number | null;
+  // 꼬리물기 면접: 패널이 충분히 검증했거나 상한 도달 시 종료 신호(이때 question 등은 없음)
+  done?: boolean;
+  concludeReason?: string | null;
 };
 
 export type AnswerFeedback = {

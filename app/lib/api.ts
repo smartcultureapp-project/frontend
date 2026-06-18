@@ -316,6 +316,13 @@ export const sessions = {
       body: { answer, speechMetrics },
     }),
 
+  // 무음(문장 끝) 시점 실시간 코칭 힌트 (Haiku)
+  liveHint: (id: string, partial: string) =>
+    request<{ hint: string; latencyMs: number }>(
+      `/sessions/${id}/interview/live-hint`,
+      { method: "POST", body: { partial } },
+    ),
+
   // 4-2단계: 최종 면접 리포트 생성·저장
   generateReport: (id: string) =>
     request<FinalReport>(`/sessions/${id}/interview/report`, {
