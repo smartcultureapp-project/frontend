@@ -17,8 +17,9 @@ FROM node:22-slim AS build
 WORKDIR /app
 
 # NEXT_PUBLIC_* 은 빌드 시점에 코드에 인라인된다.
-# Dokploy Environment 값이 build-arg 로 전달된다.
-ARG NEXT_PUBLIC_API_URL
+# Dokploy(Dockerfile 빌드)는 Environment 값을 build-arg 로 안 넘기므로
+# 여기 기본값을 박아둔다. build-arg 가 오면 그걸로 덮어쓴다.
+ARG NEXT_PUBLIC_API_URL=https://preq-api.jwkwon.dev/api
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 COPY --from=deps /app/node_modules ./node_modules
