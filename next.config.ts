@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Docker 배포용: 의존성 추적된 최소 실행 번들을 .next/standalone 에 생성.
+  output: "standalone",
   turbopack: {
     root: __dirname,
   },
